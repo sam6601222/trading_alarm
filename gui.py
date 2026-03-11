@@ -167,6 +167,12 @@ class TradingAlarmApp(QMainWindow):
         settings_layout.addWidget(QLabel("60分K 提醒音效 SELECT 60M SOUND"), alignment=Qt.AlignmentFlag.AlignLeft)
         self.sound_combo_60m = QComboBox()
         settings_layout.addWidget(self.sound_combo_60m)
+
+        # 刷新按鈕
+        self.refresh_assets_btn = QPushButton("🔄 重新掃描 assets 資料夾")
+        self.refresh_assets_btn.setStyleSheet("font-size: 11px; padding: 2px; color: #888888; border: 1px dashed #444444;")
+        self.refresh_assets_btn.clicked.connect(self.load_sound_files)
+        settings_layout.addWidget(self.refresh_assets_btn)
         
         # 音量控制
         settings_layout.addSpacing(10)
@@ -194,6 +200,15 @@ class TradingAlarmApp(QMainWindow):
         settings_layout.addLayout(adv_layout)
 
         main_layout.addWidget(settings_frame)
+
+        # 連結訊號以自動儲存設定
+        self.sound_combo_5m.currentIndexChanged.connect(self.save_config)
+        self.sound_combo_60m.currentIndexChanged.connect(self.save_config)
+        self.vol_slider.valueChanged.connect(self.save_config)
+        self.advance_secs.valueChanged.connect(self.save_config)
+
+        # 載入現有設定
+        self.load_config()
 
         # 4. 底部：啟動按鈕
         bottom_layout = QHBoxLayout()
@@ -235,16 +250,69 @@ class TradingAlarmApp(QMainWindow):
         self.console_label.setWordWrap(True)
         main_layout.addWidget(self.console_label)
 
+    def load_config(self):
+        """從 config.json 載入使用者設定"""
+        import json
+        config_path = "config.json"
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                
+                # 暫時禁止訊號以防載入時觸發重複儲存
+                self.sound_combo_5m.blockSignals(True)
+                self.sound_combo_60m.blockSignals(True)
+                self.vol_slider.blockSignals(True)
+                self.advance_secs.blockSignals(True)
+
+                # 套用設定
+                idx_5m = self.sound_combo_5m.findText(config.get("sound_5m", ""))
+                if idx_5m >= 0: self.sound_combo_5m.setCurrentIndex(idx_5m)
+                
+                idx_60m = self.sound_combo_60m.findText(config.get("sound_60m", ""))
+                if idx_60m >= 0: self.sound_combo_60m.setCurrentIndex(idx_60m)
+                
+                self.vol_slider.setValue(config.get("volume", 80))
+                self.vol_label.setText(f"{self.vol_slider.value()}%")
+                self.advance_secs.setValue(config.get("advance_secs", 10))
+
+                self.sound_combo_5m.blockSignals(False)
+                self.sound_combo_60m.blockSignals(False)
+                self.vol_slider.blockSignals(False)
+                self.advance_secs.blockSignals(False)
+            except Exception as e:
+                print(f"載入設定失敗: {e}")
+
+    def save_config(self):
+        """儲存目前設定到 config.json"""
+        import json
+        config = {
+            "sound_5m": self.sound_combo_5m.currentText(),
+            "sound_60m": self.sound_combo_60m.currentText(),
+            "volume": self.vol_slider.value(),
+            "advance_secs": self.advance_secs.value()
+        }
+        try:
+            with open("config.json", "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"儲存設定失敗: {e}")
+
     def load_sound_files(self):
         """讀取 assets 資料夾下的音樂檔案"""
+        old_val_5m = self.sound_combo_5m.currentText()
+        old_val_60m = self.sound_combo_60m.currentText()
+
         self.sound_combo_5m.clear()
         self.sound_combo_60m.clear()
         assets_dir = "assets"
         if not os.path.exists(assets_dir):
             os.makedirs(assets_dir)
             
-        # 掃描資料夾
-        files = [f for f in os.listdir(assets_dir) if f.endswith(('.wav', '.mp3'))]
+        # 掃描資料夾 (擴充支援格式)
+        supported_exts = ('.wav', '.mp3', '.m4a', '.ogg', '.flac')
+        files = [f for f in os.listdir(assets_dir) if f.lower().endswith(supported_exts)]
+        
         if not files:
             self.sound_combo_5m.addItem("無檔案 (系統 Beep)")
             self.sound_combo_60m.addItem("無檔案 (系統 Beep)")
@@ -253,6 +321,15 @@ class TradingAlarmApp(QMainWindow):
         for f in files:
             self.sound_combo_5m.addItem(f)
             self.sound_combo_60m.addItem(f)
+            
+        # 嘗試還原剛才選過的 (如果刷新後還在的話)
+        idx_5m = self.sound_combo_5m.findText(old_val_5m)
+        if idx_5m >= 0: self.sound_combo_5m.setCurrentIndex(idx_5m)
+        idx_60m = self.sound_combo_60m.findText(old_val_60m)
+        if idx_60m >= 0: self.sound_combo_60m.setCurrentIndex(idx_60m)
+        
+        if hasattr(self, 'console_label'):
+            self.console_label.setText(f"已掃描 assets。找到 {len(files)} 個相容音效檔。")
 
     def init_timer(self):
         self.refresh_timer = QTimer(self)
