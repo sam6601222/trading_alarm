@@ -9,18 +9,23 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import QTimer, Qt, QSize
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette
 
+# 全域變數保存 Mutex 參考，防止垃圾回收導致鎖定失效
+GLOBAL_MUTEX = None
+
 # Windows 單一實例檢查 (防止幽靈進程)
 def check_single_instance():
+    global GLOBAL_MUTEX
     if os.name == 'nt':
         import ctypes
         kernel32 = ctypes.windll.kernel32
         mutex_name = "TradingAlarm_SingleInstance_Mutex_v2"
-        mutex = kernel32.CreateMutexW(None, False, mutex_name)
+        # 建立 Mutex 並將其賦值給全域變數以維持生命週期
+        GLOBAL_MUTEX = kernel32.CreateMutexW(None, False, mutex_name)
         last_error = kernel32.GetLastError()
         if last_error == 183: # ERROR_ALREADY_EXISTS
-            return False, mutex
-        return True, mutex
-    return True, None
+            return False
+        return True
+    return True
 
 # 嘗試導入 pygame 播放音效
 try:
@@ -273,13 +278,18 @@ class TradingAlarmApp(QMainWindow):
         with open(log_path, "a", encoding="utf-8") as f: f.write(f"[{datetime.datetime.now()}] {msg}\n")
 
     def play_alarm(self, alarm_type="5m"):
+        # 決定音量
         volume = self.vol_slider.value() / 100.0
         filename = (self.sound_combo_5m if alarm_type != "60m" else self.sound_combo_60m).currentText()
         sound_path = os.path.join("assets", filename)
+        
         if PYGAME_AVAILABLE and os.path.exists(sound_path) and "無檔案" not in filename:
             try:
-                pygame.mixer.stop() # 停止當前聲音，防止疊加
-                s = pygame.mixer.Sound(sound_path); s.set_volume(volume); s.play()
+                # 播放前先停止所有播放中的聲音，確保不疊加
+                pygame.mixer.stop()
+                s = pygame.mixer.Sound(sound_path)
+                s.set_volume(volume)
+                s.play()
                 return
             except Exception as e: print(f"播放失敗: {e}")
         import winsound
@@ -316,11 +326,11 @@ class TradingAlarmApp(QMainWindow):
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    success, mutex = check_single_instance()
-    if not success:
+    # 執行單一實例檢查
+    if not check_single_instance():
         # 彈窗提醒已在執行
         app = QApplication(sys.argv)
-        QMessageBox.warning(None, "重複啟動", "交易鬧鐘已經在執行中了！\n請檢查右下角系統小圖示 (托盤)。")
+        QMessageBox.warning(None, "重複啟動", "交易鬧鐘已經在執行中了！\n請檢查右下角系統小圖示 (托盤)。\n\n如果確定已關閉，請運行 kill_ghosts.bat")
         sys.exit(0)
     
     app = QApplication(sys.argv)
