@@ -194,8 +194,21 @@ class TradingAlarmApp(QMainWindow):
         self.mute_btn.setCheckable(True)
         self.mute_btn.clicked.connect(self.toggle_5k_mute)
         
-        bottom_layout.addWidget(self.monitor_btn, 4)
-        bottom_layout.addWidget(self.mute_btn, 1)
+        bottom_layout.addWidget(self.monitor_btn, 3)
+        
+        self.test_sound_btn = QPushButton("測試音效")
+        self.test_sound_btn.setFixedSize(90, 50)
+        self.test_sound_btn.setStyleSheet(f"border-radius: 8px; border: 1px solid #333333; font-size: 14px;")
+        self.test_sound_btn.clicked.connect(self.play_alarm)
+        bottom_layout.addWidget(self.test_sound_btn)
+        
+        self.mute_btn = QPushButton("🔊")
+        self.mute_btn.setFixedSize(60, 50)
+        self.mute_btn.setStyleSheet(f"border-radius: 8px; border: 1px solid #333333; font-size: 20px;")
+        self.mute_btn.setCheckable(True)
+        self.mute_btn.clicked.connect(self.toggle_5k_mute)
+        bottom_layout.addWidget(self.mute_btn)
+        
         main_layout.addLayout(bottom_layout)
 
         # 5. 系統日誌
@@ -204,6 +217,7 @@ class TradingAlarmApp(QMainWindow):
         self.clear_log_btn = QPushButton("清除")
         self.clear_log_btn.setStyleSheet("color: #666666; font-size: 12px; border: none;")
         self.clear_log_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_log_btn.clicked.connect(lambda: self.console_label.setText("日誌已清除。"))
         log_header.addWidget(self.clear_log_btn, alignment=Qt.AlignmentFlag.AlignRight)
         main_layout.addLayout(log_header)
 
@@ -260,19 +274,13 @@ class TradingAlarmApp(QMainWindow):
         session = self.engine.get_current_session(now)
         
         # 3. 計算下次收 K
-        # 根據時段選擇主頻率顯示
         main_freq = 5 if session in ['day', 'us_open'] else 60
         self.current_freq_val.setText(f"{main_freq} MIN" if session != 'none' else "休市中")
         
         self.next_5k = self.engine.get_next_k_close(now, 5)
         self.next_60k = self.engine.get_next_k_close(now, 60)
         
-        # 判斷下一次最接近的提醒
-        if session in ['day', 'us_open']:
-            next_t = self.next_5k
-        else:
-            next_t = self.next_60k
-        
+        next_t = self.next_5k if session in ['day', 'us_open'] else self.next_60k
         self.next_alarm_val.setText(next_t.strftime("%H:%M:%S"))
 
         # 4. 提醒邏輯
@@ -281,6 +289,12 @@ class TradingAlarmApp(QMainWindow):
             diff_5k = int((self.next_5k - now).total_seconds())
             diff_60k = int((self.next_60k - now).total_seconds())
             
+            # 美股開盤 5 分鐘強提醒 (21:35 或 22:35)
+            us_open_t = self.engine.get_us_open_time(now)
+            opening_alert_t = (datetime.datetime.combine(now.date(), us_open_t) + datetime.timedelta(minutes=5)).time()
+            if now.time().hour == opening_alert_t.hour and now.time().minute == opening_alert_t.minute and now.time().second == 0:
+                self.trigger_alert("美股開盤 5 分鐘觀察點！")
+
             # 5K 提醒
             if session in ['day', 'us_open'] and not self.is_5k_muted:
                 if diff_5k == advance:
