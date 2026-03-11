@@ -156,18 +156,33 @@ class TradingAlarmApp(QMainWindow):
         
         # 音效選擇
         settings_layout.addSpacing(10)
-        settings_layout.addWidget(QLabel("提醒音效選擇 ALERT SOUND"), alignment=Qt.AlignmentFlag.AlignLeft)
-        self.sound_combo = QComboBox()
-        self.sound_items = [
-            "清脆雙音 (Classic Duo)", 
-            "警急訊號 (Emergency)", 
-            "柔和水滴 (Water Drop)", 
-            "數位合成 (Digital)", 
-            "鋼琴單音 (Piano)",
-            "系統預設 (Beep)"
-        ]
-        self.sound_combo.addItems(self.sound_items)
-        settings_layout.addWidget(self.sound_combo)
+        
+        # 5分K 音效
+        settings_layout.addWidget(QLabel("5分K 提醒音效 SELECT 5M SOUND"), alignment=Qt.AlignmentFlag.AlignLeft)
+        self.sound_combo_5m = QComboBox()
+        settings_layout.addWidget(self.sound_combo_5m)
+        
+        # 60分K 音效
+        settings_layout.addSpacing(5)
+        settings_layout.addWidget(QLabel("60分K 提醒音效 SELECT 60M SOUND"), alignment=Qt.AlignmentFlag.AlignLeft)
+        self.sound_combo_60m = QComboBox()
+        settings_layout.addWidget(self.sound_combo_60m)
+        
+        # 音量控制
+        settings_layout.addSpacing(10)
+        vol_layout = QHBoxLayout()
+        vol_layout.addWidget(QLabel("提醒音量 VOLUME:"))
+        from PyQt6.QtWidgets import QSlider
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setValue(80)
+        vol_layout.addWidget(self.vol_slider)
+        self.vol_label = QLabel("80%")
+        self.vol_slider.valueChanged.connect(lambda v: self.vol_label.setText(f"{v}%"))
+        vol_layout.addWidget(self.vol_label)
+        settings_layout.addLayout(vol_layout)
+        
+        self.load_sound_files()
         
         # 提前秒數
         adv_layout = QHBoxLayout()
@@ -188,18 +203,12 @@ class TradingAlarmApp(QMainWindow):
         self.monitor_btn.setChecked(True)
         self.monitor_btn.clicked.connect(self.toggle_monitoring)
         
-        self.mute_btn = QPushButton("🔊")
-        self.mute_btn.setFixedSize(60, 50)
-        self.mute_btn.setStyleSheet(f"border-radius: 8px; border: 1px solid #333333; font-size: 20px;")
-        self.mute_btn.setCheckable(True)
-        self.mute_btn.clicked.connect(self.toggle_5k_mute)
-        
         bottom_layout.addWidget(self.monitor_btn, 3)
         
         self.test_sound_btn = QPushButton("測試音效")
         self.test_sound_btn.setFixedSize(90, 50)
         self.test_sound_btn.setStyleSheet(f"border-radius: 8px; border: 1px solid #333333; font-size: 14px;")
-        self.test_sound_btn.clicked.connect(self.play_alarm)
+        self.test_sound_btn.clicked.connect(lambda: self.play_alarm("test"))
         bottom_layout.addWidget(self.test_sound_btn)
         
         self.mute_btn = QPushButton("🔊")
@@ -225,6 +234,25 @@ class TradingAlarmApp(QMainWindow):
         self.console_label.setStyleSheet(f"color: {self.sub_text_color}; font-size: 12px;")
         self.console_label.setWordWrap(True)
         main_layout.addWidget(self.console_label)
+
+    def load_sound_files(self):
+        """讀取 assets 資料夾下的音樂檔案"""
+        self.sound_combo_5m.clear()
+        self.sound_combo_60m.clear()
+        assets_dir = "assets"
+        if not os.path.exists(assets_dir):
+            os.makedirs(assets_dir)
+            
+        # 掃描資料夾
+        files = [f for f in os.listdir(assets_dir) if f.endswith(('.wav', '.mp3'))]
+        if not files:
+            self.sound_combo_5m.addItem("無檔案 (系統 Beep)")
+            self.sound_combo_60m.addItem("無檔案 (系統 Beep)")
+            return
+
+        for f in files:
+            self.sound_combo_5m.addItem(f)
+            self.sound_combo_60m.addItem(f)
 
     def init_timer(self):
         self.refresh_timer = QTimer(self)
@@ -293,21 +321,21 @@ class TradingAlarmApp(QMainWindow):
             us_open_t = self.engine.get_us_open_time(now)
             opening_alert_t = (datetime.datetime.combine(now.date(), us_open_t) + datetime.timedelta(minutes=5)).time()
             if now.time().hour == opening_alert_t.hour and now.time().minute == opening_alert_t.minute and now.time().second == 0:
-                self.trigger_alert("美股開盤 5 分鐘觀察點！")
+                self.trigger_alert("美股開盤 5 分鐘觀察點！", "5m")
 
             # 5K 提醒
             if session in ['day', 'us_open'] and not self.is_5k_muted:
                 if diff_5k == advance:
-                    self.trigger_alert("5分K 收線提醒")
+                    self.trigger_alert("5分K 收線提醒", "5m")
             
             # 60K 提醒
             if session in ['night', 'us_open']:
                 if diff_60k == advance:
-                    self.trigger_alert("60分K 收線提醒")
+                    self.trigger_alert("60分K 收線提醒", "60m")
 
-    def trigger_alert(self, msg):
+    def trigger_alert(self, msg, alarm_type="5m"):
         self.log_event(msg)
-        self.play_alarm()
+        self.play_alarm(alarm_type)
         self.tray_icon.showMessage("交易鬧鐘", msg, QSystemTrayIcon.MessageIcon.Information, 5000)
 
     def log_event(self, msg):
@@ -319,20 +347,35 @@ class TradingAlarmApp(QMainWindow):
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{datetime.datetime.now()}] {msg}\n")
 
-    def play_alarm(self):
-        idx = self.sound_combo.currentIndex()
-        if PYGAME_AVAILABLE:
-            # 這裡可以根據 idx 映射到不同音頻檔
-            # assets/s0.wav, assets/s1.wav...
-            sound_path = f"assets/s{idx}.wav"
-            if os.path.exists(sound_path):
-                pygame.mixer.Sound(sound_path).play()
-                return
+    def play_alarm(self, alarm_type="5m"):
+        # 獲取音量並轉換為 0.0 - 1.0
+        volume = self.vol_slider.value() / 100.0
         
-        # 備援音效 (不同頻率識別)
+        # 決定音效檔名
+        if alarm_type == "5m":
+            filename = self.sound_combo_5m.currentText()
+        elif alarm_type == "60m":
+            filename = self.sound_combo_60m.currentText()
+        else: # test
+            filename = self.sound_combo_5m.currentText()
+            
+        sound_path = os.path.join("assets", filename)
+        
+        if PYGAME_AVAILABLE and os.path.exists(sound_path) and "無檔案" not in filename:
+            try:
+                s = pygame.mixer.Sound(sound_path)
+                s.set_volume(volume)
+                s.play()
+                return
+            except Exception as e:
+                print(f"播放失敗: {e}")
+        
+        # 備援音效
         import winsound
+        idx = self.sound_combo_5m.currentIndex() if alarm_type != "60m" else self.sound_combo_60m.currentIndex()
         freqs = [800, 1200, 1500, 2000, 2500, 1000]
-        winsound.Beep(freqs[idx], 600)
+        # winsound 不支援音量控制，僅播放頻率
+        winsound.Beep(freqs[idx % len(freqs)], 600)
 
     def closeEvent(self, event):
         if self.tray_icon.isVisible():
